@@ -1,0 +1,15 @@
+{
+  "domain": "airnut",
+  "name": "Airnut 1S",
+  "codeowners": [
+    "@hallychou"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/hallychou/ha_airnut/blob/main/README.md",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/hallychou/ha_airnut/issues",
+  "requirements": [],
+  "version": "2.1.0"
+}
