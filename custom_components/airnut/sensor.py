@@ -1,4 +1,4 @@
-"""Sensor platform for Airnut 1S integration (使用device_class默认图标)."""
+"""Sensor platform for Airnut 1S integration (添加state_class支持统计)."""
 import logging
 from datetime import datetime
 
@@ -12,14 +12,14 @@ from .const import CONF_IP, DOMAIN, SENSOR_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
-# 生成传感器描述符（仅保留device_class和单位，移除icon）
+# 生成传感器描述符（新增state_class传递）
 SENSOR_DESCRIPTIONS = [
     SensorEntityDescription(
         key=key,
         name=SENSOR_TYPES[key]["name"],
         device_class=SENSOR_TYPES[key]["device_class"],
-        native_unit_of_measurement=SENSOR_TYPES[key]["native_unit_of_measurement"]
-        # 移除icon参数，让HA自动分配
+        native_unit_of_measurement=SENSOR_TYPES[key]["native_unit_of_measurement"],
+        state_class=SENSOR_TYPES[key]["state_class"]  # 新增state_class
     )
     for key in SENSOR_TYPES.keys()
 ]
@@ -29,7 +29,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Airnut 1S sensors (批量创建，使用默认图标)."""
+    """Set up Airnut 1S sensors (批量创建，支持统计)."""
     if DOMAIN not in hass.data or "server" not in hass.data[DOMAIN]:
         _LOGGER.error("Airnut server not initialized")
         return
@@ -44,7 +44,7 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=True)
 
 class AirnutSensor(SensorEntity):
-    """Airnut 1S Sensor Entity (使用HA原生默认图标)."""
+    """Airnut 1S Sensor Entity (支持HA长期统计)."""
     _attr_should_poll = True
     _attr_available = True
 
@@ -55,7 +55,7 @@ class AirnutSensor(SensorEntity):
         device_ip: str,
         description: SensorEntityDescription,
     ) -> None:
-        """Initialize sensor (仅保留核心属性，无手动icon)."""
+        """Initialize sensor (支持state_class统计)."""
         self._entry = entry
         self._server = server
         self._device_ip = device_ip
