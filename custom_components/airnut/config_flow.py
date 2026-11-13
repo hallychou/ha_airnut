@@ -1,10 +1,10 @@
 """Config flow for Airnut 1S integration."""
-import logging
-import uuid
+import ipaddress
+from datetime import datetime
+
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
@@ -20,8 +20,6 @@ from .const import (
     DOMAIN,
 )
 
-_LOGGER = logging.getLogger(__name__)
-
 class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Airnut 1S (批量创建多传感器)."""
 
@@ -32,17 +30,34 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
-            # 验证IP格式
-            if not self._validate_ip(user_input[CONF_IP]):
+            user_input.setdefault(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            user_input.setdefault(CONF_NIGHT_START, DEFAULT_NIGHT_START)
+            user_input.setdefault(CONF_NIGHT_END, DEFAULT_NIGHT_END)
+            user_input.setdefault(CONF_NIGHT_UPDATE, DEFAULT_NIGHT_UPDATE)
+            ip = user_input[CONF_IP].strip()
+            if not self._validate_ip(ip):
                 errors[CONF_IP] = "invalid_ip"
+            elif not all(
+                self._validate_time(user_input[key])
+                for key in (CONF_NIGHT_START, CONF_NIGHT_END)
+            ):
+                if not self._validate_time(user_input[CONF_NIGHT_START]):
+                    errors[CONF_NIGHT_START] = "invalid_time"
+                if not self._validate_time(user_input[CONF_NIGHT_END]):
+                    errors[CONF_NIGHT_END] = "invalid_time"
             else:
-                # 用设备IP作为唯一ID（确保一个IP只创建一个配置条目）
-                unique_id = f"airnut_{user_input[CONF_IP]}_{uuid.uuid4().hex[:8]}"
-                await self.async_set_unique_id(unique_id)
+                ip = str(ipaddress.IPv4Address(ip))
+                user_input[CONF_IP] = ip
+                if any(
+                    entry.data.get(CONF_IP) == ip
+                    for entry in self._async_current_entries()
+                ):
+                    return self.async_abort(reason="already_configured")
+
+                await self.async_set_unique_id(f"airnut_{ip}")
                 self._abort_if_unique_id_configured(updates=user_input)
-                
-                # 配置条目标题（仅显示设备IP）
-                title = f"Airnut 1S ({user_input[CONF_IP]})"
+
+                title = f"Airnut 1S ({ip})"
                 return self.async_create_entry(
                     title=title,
                     data=user_input,
@@ -68,13 +83,20 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     def _validate_ip(ip: str) -> bool:
         """Simple IP validation (IPv4 only)."""
-        parts = ip.split(".")
-        if len(parts) != 4:
+        try:
+            ipaddress.IPv4Address(ip)
+        except ipaddress.AddressValueError:
             return False
-        for part in parts:
-            if not part.isdigit() or not 0 <= int(part) <= 255:
-                return False
         return True
+
+    @staticmethod
+    def _validate_time(value: str) -> bool:
+        """Validate a 24-hour HH:MM value."""
+        try:
+            parsed = datetime.strptime(value, "%H:%M")
+        except (TypeError, ValueError):
+            return False
+        return value == parsed.strftime("%H:%M")
 
     async def async_step_import(self, import_config: dict) -> FlowResult:
         """Handle import from YAML config."""

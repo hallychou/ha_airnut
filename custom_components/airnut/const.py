@@ -1,5 +1,5 @@
 """Constants for Airnut 1S integration."""
-from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass  # 新增StateClass导入
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
 # 集成域名
 DOMAIN = "airnut"
@@ -22,34 +22,35 @@ DEFAULT_NIGHT_UPDATE = True
 SOCKET_HOST = "0.0.0.0"
 SOCKET_PORT = 10511
 SOCKET_BUFFER_SIZE = 1024
+MAX_SOCKET_BUFFER_SIZE = 64 * 1024
 
-# 传感器类型规范配置（新增state_class）
+# Sensor descriptions
 SENSOR_TYPES = {
     "temperature": {
         "name": "Temperature",
         "device_class": SensorDeviceClass.TEMPERATURE,
         "native_unit_of_measurement": "°C",
-        "state_class": SensorStateClass.MEASUREMENT  # 新增状态类
+        "state_class": SensorStateClass.MEASUREMENT,
     },
     "humidity": {
         "name": "Humidity",
         "device_class": SensorDeviceClass.HUMIDITY,
         "native_unit_of_measurement": "%",
-        "state_class": SensorStateClass.MEASUREMENT
+        "state_class": SensorStateClass.MEASUREMENT,
     },
     "pm25": {
         "name": "PM2.5",
         "device_class": SensorDeviceClass.PM25,
         "native_unit_of_measurement": "µg/m³",
-        "state_class": SensorStateClass.MEASUREMENT
+        "state_class": SensorStateClass.MEASUREMENT,
     },
     "co2": {
         "name": "CO2",
         "device_class": SensorDeviceClass.CO2,
         "native_unit_of_measurement": "ppm",
-        "state_class": SensorStateClass.MEASUREMENT
+        "state_class": SensorStateClass.MEASUREMENT,
     },
 }
 
-# 集成平台定义
+# Integration platforms
 PLATFORMS = ["sensor"]
