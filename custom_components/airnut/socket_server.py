@@ -45,6 +45,8 @@ class AirnutAsyncSocketServer:
         self.config = config
         self._server: asyncio.Server | None = None
         self._clients: dict[asyncio.StreamWriter, str] = {}
+        self._client_socket_ids: dict[asyncio.StreamWriter, int | str] = {}
+        self._configured_clients: set[asyncio.StreamWriter] = set()
         self._receive_buffers: dict[asyncio.StreamWriter, bytearray] = {}
         self._device_data: dict[str, AirnutDeviceData] = {}
         self._last_scan: dict[str, float] = {}
@@ -134,6 +136,8 @@ class AirnutAsyncSocketServer:
                     _LOGGER.warning("Failed to close client connection: %s", err)
                 finally:
                     self._clients.pop(writer, None)
+                    self._client_socket_ids.pop(writer, None)
+                    self._configured_clients.discard(writer)
                     self._receive_buffers.pop(writer, None)
 
             self._device_data.clear()
@@ -154,17 +158,20 @@ class AirnutAsyncSocketServer:
 
         client_ip = peer[0]
         self._clients[writer] = client_ip
+        self._client_socket_ids.pop(writer, None)
+        self._configured_clients.discard(writer)
         self._receive_buffers[writer] = bytearray()
         _LOGGER.info("Airnut device connected: %s", client_ip)
 
         try:
-            await self._send_initial_commands(writer)
             while data := await reader.read(SOCKET_BUFFER_SIZE):
                 await self._parse_device_data(client_ip, writer, data)
         except (ConnectionError, OSError) as err:
             _LOGGER.error("Error handling client %s: %s", client_ip, err)
         finally:
             self._clients.pop(writer, None)
+            self._client_socket_ids.pop(writer, None)
+            self._configured_clients.discard(writer)
             self._receive_buffers.pop(writer, None)
             if client_ip not in self._clients.values():
                 self._device_data.pop(client_ip, None)
@@ -174,39 +181,46 @@ class AirnutAsyncSocketServer:
             except (ConnectionError, OSError) as err:
                 _LOGGER.debug("Error closing client %s: %s", client_ip, err)
 
-    async def _send_initial_commands(self, writer: asyncio.StreamWriter) -> None:
-        """Send initial handshake commands to the device."""
-        volume_cmd = {
-            "sendback_appserver": 100000007,
-            "param": {
-                "volume": 0,
-                "socket_id": 100000007,
-                "check_key": "s_set_volume19085",
-            },
-            "volume": 0,
-            "p": "set_volume",
-            "type": "control",
-            "check_key": "s_set_volume19085",
-        }
+    async def _send_get_command(
+        self, writer: asyncio.StreamWriter, socket_id: int | str
+    ) -> None:
+        """Request the device's current sensor data after login."""
+        check_key = f"s_get{socket_id}"
         get_cmd = {
             "sendback_appserver": 100000007,
             "param": {
                 "socket_id": 100000007,
                 "type": 1,
-                "check_key": "s_get19085",
+                "check_key": check_key,
             },
             "p": "get",
             "type": "control",
-            "check_key": "s_get19085",
+            "check_key": check_key,
         }
 
-        try:
-            writer.write(json.dumps(volume_cmd).encode("utf-8"))
-            await writer.drain()
-            writer.write(json.dumps(get_cmd).encode("utf-8"))
-            await writer.drain()
-        except (ConnectionError, OSError) as err:
-            _LOGGER.error("Failed to send initial commands: %s", err)
+        writer.write(json.dumps(get_cmd).encode("utf-8"))
+        await writer.drain()
+
+    async def _send_volume_command(
+        self, writer: asyncio.StreamWriter, socket_id: int | str
+    ) -> None:
+        """Set the device volume after its first valid sensor report."""
+        volume_key = f"s_set_volume{socket_id}"
+        volume_cmd = {
+            "sendback_appserver": 100000007,
+            "param": {
+                "volume": 0,
+                "socket_id": 100000007,
+                "check_key": volume_key,
+            },
+            "volume": 0,
+            "p": "set_volume",
+            "type": "control",
+            "check_key": volume_key,
+        }
+
+        writer.write(json.dumps(volume_cmd).encode("utf-8"))
+        await writer.drain()
 
     async def _parse_device_data(
         self,
@@ -266,6 +280,16 @@ class AirnutAsyncSocketServer:
             consumed = len(raw_data[:position].encode("utf-8"))
             del buffer[:consumed]
 
+    @staticmethod
+    def _socket_id_from_imei(json_data: dict) -> str | None:
+        params = json_data.get("param")
+        imei = params.get("imei") if isinstance(params, dict) else None
+        if not isinstance(imei, str):
+            return None
+
+        digits = "".join(char for char in imei if char.isascii() and char.isdigit())
+        return digits[-5:] if len(digits) >= 5 else None
+
     async def _handle_device_message(
         self,
         client_ip: str,
@@ -274,14 +298,21 @@ class AirnutAsyncSocketServer:
     ) -> None:
         """Handle a decoded message from an Airnut device."""
         if json_data.get("p") == "log_in":
+            socket_id = self._socket_id_from_imei(json_data)
+            if socket_id is None:
+                _LOGGER.warning("Login message from %s has no valid IMEI", client_ip)
+                return
+
+            self._client_socket_ids[writer] = socket_id
             login_resp = {
                 "type": "client",
-                "socket_id": 18567,
+                "socket_id": socket_id,
                 "result": 0,
                 "p": "log_in",
             }
             writer.write(json.dumps(login_resp).encode("utf-8"))
             await writer.drain()
+            await self._send_get_command(writer, socket_id)
         elif json_data.get("p") == "post":
             try:
                 indoor_data = json_data["param"]["indoor"]
@@ -298,6 +329,10 @@ class AirnutAsyncSocketServer:
 
             self._device_data[client_ip] = device_data
             _LOGGER.debug("Updated data for %s: %s", client_ip, device_data)
+            socket_id = self._client_socket_ids.get(writer)
+            if socket_id is not None and writer not in self._configured_clients:
+                await self._send_volume_command(writer, socket_id)
+                self._configured_clients.add(writer)
 
     async def update_device_data(self, device_ip: str) -> None:
         """Request updated data from a device when its scan interval expires."""
@@ -313,29 +348,36 @@ class AirnutAsyncSocketServer:
             return
 
         writers = [
-            writer
+            (writer, socket_id)
             for writer, client_ip in self._clients.items()
             if client_ip == device_ip
+            and (socket_id := self._client_socket_ids.get(writer)) is not None
         ]
         if not writers:
             return
 
-        get_cmd = {
-            "sendback_appserver": 100000007,
-            "param": {"socket_id": 100000007, "type": 1, "check_key": "s_get19085"},
-            "p": "get",
-            "type": "control",
-            "check_key": "s_get19085",
-        }
-
         self._last_scan[device_ip] = now
-        for writer in writers:
+        for writer, socket_id in writers:
+            check_key = f"s_get{socket_id}"
+            get_cmd = {
+                "sendback_appserver": 100000007,
+                "param": {
+                    "socket_id": 100000007,
+                    "type": 1,
+                    "check_key": check_key,
+                },
+                "p": "get",
+                "type": "control",
+                "check_key": check_key,
+            }
             try:
                 writer.write(json.dumps(get_cmd).encode("utf-8"))
                 await writer.drain()
             except (ConnectionError, OSError) as err:
                 _LOGGER.warning("Failed to send get command to %s: %s", device_ip, err)
                 self._clients.pop(writer, None)
+                self._client_socket_ids.pop(writer, None)
+                self._configured_clients.discard(writer)
                 self._receive_buffers.pop(writer, None)
 
     def get_device_data(self, ip: str) -> AirnutDeviceData | None:
