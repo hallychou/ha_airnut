@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Airnut 1S",
+        "description": "自动发现会在 TCP 10511 端口监听设备连接，最长等待 30 秒。请确保 apn.airnut.com 已解析到此 Home Assistant；若未发现设备，请重新连接或重启设备后再试。",
+        "data": {
+          "ip": "设备 IP（手动填写）",
+          "auto_discover": "自动发现设备",
+          "scan_interval": "扫描间隔",
+          "night_start": "夜间开始时间",
+          "night_end": "夜间结束时间",
+          "night_update": "夜间更新"
+        }
+      }
+    },
+    "error": {
+      "invalid_ip": "请输入有效的 IPv4 地址，或启用自动发现。",
+      "invalid_time": "请输入 HH:MM 格式的有效时间。",
+      "device_not_found": "30 秒内未发现新的 Airnut 设备。请检查 DNS 重定向，并重新连接或重启设备。",
+      "discovery_failed": "无法监听 TCP 10511 端口，请检查端口是否被其他服务占用。"
+    },
+    "abort": {
+      "already_configured": "此 Airnut 设备已配置。"
+    }
+  }
+}

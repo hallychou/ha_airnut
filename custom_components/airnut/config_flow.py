@@ -1,5 +1,7 @@
 """Config flow for Airnut 1S integration."""
+import asyncio
 import ipaddress
+import logging
 from datetime import datetime
 
 import voluptuous as vol
@@ -19,6 +21,11 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
+from .socket_server import AirnutAsyncSocketServer
+
+_LOGGER = logging.getLogger(__name__)
+CONF_AUTO_DISCOVER = "auto_discover"
+DISCOVERY_TIMEOUT = 30
 
 class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Airnut 1S (批量创建多传感器)."""
@@ -34,10 +41,9 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user_input.setdefault(CONF_NIGHT_START, DEFAULT_NIGHT_START)
             user_input.setdefault(CONF_NIGHT_END, DEFAULT_NIGHT_END)
             user_input.setdefault(CONF_NIGHT_UPDATE, DEFAULT_NIGHT_UPDATE)
-            ip = user_input[CONF_IP].strip()
-            if not self._validate_ip(ip):
-                errors[CONF_IP] = "invalid_ip"
-            elif not all(
+            auto_discover = user_input.pop(CONF_AUTO_DISCOVER, False)
+            ip = user_input.get(CONF_IP, "").strip()
+            if not all(
                 self._validate_time(user_input[key])
                 for key in (CONF_NIGHT_START, CONF_NIGHT_END)
             ):
@@ -45,7 +51,21 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors[CONF_NIGHT_START] = "invalid_time"
                 if not self._validate_time(user_input[CONF_NIGHT_END]):
                     errors[CONF_NIGHT_END] = "invalid_time"
-            else:
+            elif auto_discover:
+                try:
+                    discovered_ip = await self._async_discover_device()
+                except OSError as err:
+                    _LOGGER.error("Unable to start Airnut device discovery: %s", err)
+                    errors["base"] = "discovery_failed"
+                else:
+                    if discovered_ip is None:
+                        errors["base"] = "device_not_found"
+                    else:
+                        ip = discovered_ip
+            elif not self._validate_ip(ip):
+                errors[CONF_IP] = "invalid_ip"
+
+            if not errors:
                 ip = str(ipaddress.IPv4Address(ip))
                 user_input[CONF_IP] = ip
                 if any(
@@ -66,7 +86,8 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # 简化schema：移除传感器类型选择
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_IP): str,
+                vol.Optional(CONF_IP, default=""): str,
+                vol.Optional(CONF_AUTO_DISCOVER, default=False): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
                     vol.Coerce(int), vol.Range(min=30)
                 ),
@@ -79,6 +100,37 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=data_schema, errors=errors
         )
+
+    async def _async_discover_device(self) -> str | None:
+        """Listen for an unconfigured Airnut device connecting to the server."""
+        domain_data = self.hass.data.setdefault(DOMAIN, {})
+        lock = domain_data.setdefault("_discovery_lock", asyncio.Lock())
+        async with lock:
+            server = domain_data.get("server")
+            owns_server = server is None
+            if owns_server:
+                server = AirnutAsyncSocketServer(self.hass, {})
+                await server.start()
+                domain_data["server"] = server
+
+            keep_server = False
+            try:
+                excluded_ips = {
+                    entry.data[CONF_IP]
+                    for entry in self._async_current_entries()
+                    if CONF_IP in entry.data
+                }
+                discovered_ip = await server.async_wait_for_device(
+                    DISCOVERY_TIMEOUT, excluded_ips
+                )
+                keep_server = discovered_ip is not None
+                return discovered_ip
+            finally:
+                if owns_server and not keep_server:
+                    await server.stop()
+                    domain_data.pop("server", None)
+                    if not domain_data:
+                        self.hass.data.pop(DOMAIN, None)
 
     @staticmethod
     def _validate_ip(ip: str) -> bool:

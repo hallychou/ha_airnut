@@ -3,6 +3,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 
 from .const import CONF_IP, DOMAIN, PLATFORMS
@@ -75,6 +76,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data.pop(DOMAIN, None)
             _LOGGER.info("All Airnut entries unloaded, server stopped")
 
+    return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Remove an Airnut device by removing its associated config entry."""
+    expected_identifier = (DOMAIN, f"airnut_{entry.data[CONF_IP]}")
+    if expected_identifier not in device_entry.identifiers:
+        return False
+
+    hass.async_create_task(
+        hass.config_entries.async_remove(entry.entry_id),
+        f"Remove Airnut config entry {entry.entry_id}",
+    )
     return True
 
 

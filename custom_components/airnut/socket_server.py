@@ -24,6 +24,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+CLIENT_CLOSE_TIMEOUT = 2
 
 
 @dataclass
@@ -51,6 +52,7 @@ class AirnutAsyncSocketServer:
         self._device_data: dict[str, AirnutDeviceData] = {}
         self._last_scan: dict[str, float] = {}
         self._device_configs: dict[str, dict] = {}
+        self._device_connected = asyncio.Event()
         self._scan_interval = config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         self._is_running = False
         self._lock = asyncio.Lock()
@@ -125,15 +127,19 @@ class AirnutAsyncSocketServer:
 
             if self._server is not None:
                 self._server.close()
-                await self._server.wait_closed()
+                try:
+                    await asyncio.wait_for(
+                        self._server.wait_closed(),
+                        timeout=CLIENT_CLOSE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("Timed out waiting for Airnut listening socket to close")
                 self._server = None
 
             for writer in list(self._clients):
-                writer.close()
+                client_ip = self._clients.get(writer, "unknown")
                 try:
-                    await writer.wait_closed()
-                except (ConnectionError, OSError) as err:
-                    _LOGGER.warning("Failed to close client connection: %s", err)
+                    await self._close_writer(writer, client_ip)
                 finally:
                     self._clients.pop(writer, None)
                     self._client_socket_ids.pop(writer, None)
@@ -145,6 +151,23 @@ class AirnutAsyncSocketServer:
             self._is_running = False
             _LOGGER.info("Airnut socket server stopped")
 
+    async def _close_writer(
+        self, writer: asyncio.StreamWriter, client_ip: str
+    ) -> None:
+        """Close a client connection without blocking shutdown indefinitely."""
+        writer.close()
+        try:
+            await asyncio.wait_for(
+                writer.wait_closed(), timeout=CLIENT_CLOSE_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.warning(
+                "Timed out closing client %s; aborting the connection", client_ip
+            )
+            writer.transport.abort()
+        except (ConnectionError, OSError) as err:
+            _LOGGER.debug("Error closing client %s: %s", client_ip, err)
+
     async def _handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -152,8 +175,7 @@ class AirnutAsyncSocketServer:
         peer = writer.get_extra_info("peername")
         if not peer:
             _LOGGER.warning("Airnut connection has no peer address")
-            writer.close()
-            await writer.wait_closed()
+            await self._close_writer(writer, "unknown")
             return
 
         client_ip = peer[0]
@@ -175,11 +197,7 @@ class AirnutAsyncSocketServer:
             self._receive_buffers.pop(writer, None)
             if client_ip not in self._clients.values():
                 self._device_data.pop(client_ip, None)
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except (ConnectionError, OSError) as err:
-                _LOGGER.debug("Error closing client %s: %s", client_ip, err)
+            await self._close_writer(writer, client_ip)
 
     async def _send_get_command(
         self, writer: asyncio.StreamWriter, socket_id: int | str
@@ -304,6 +322,7 @@ class AirnutAsyncSocketServer:
                 return
 
             self._client_socket_ids[writer] = socket_id
+            self._device_connected.set()
             login_resp = {
                 "type": "client",
                 "socket_id": socket_id,
@@ -383,3 +402,28 @@ class AirnutAsyncSocketServer:
     def get_device_data(self, ip: str) -> AirnutDeviceData | None:
         """Get latest data for a specific device IP."""
         return self._device_data.get(ip)
+
+    async def async_wait_for_device(
+        self, timeout: float, excluded_ips: set[str] | None = None
+    ) -> str | None:
+        """Wait for a logged-in Airnut device and return its IP address."""
+        excluded_ips = excluded_ips or set()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+
+        while True:
+            self._device_connected.clear()
+            for writer, client_ip in self._clients.items():
+                if (
+                    client_ip not in excluded_ips
+                    and writer in self._client_socket_ids
+                ):
+                    return client_ip
+
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return None
+            try:
+                await asyncio.wait_for(self._device_connected.wait(), remaining)
+            except asyncio.TimeoutError:
+                return None

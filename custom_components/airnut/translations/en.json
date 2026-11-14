@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Airnut 1S",
+        "description": "Automatic discovery listens for a device connection on TCP port 10511 for up to 30 seconds. Ensure apn.airnut.com resolves to this Home Assistant instance. If no device is found, reconnect or restart it and try again.",
+        "data": {
+          "ip": "Device IP (manual)",
+          "auto_discover": "Automatically discover a device",
+          "scan_interval": "Scan interval",
+          "night_start": "Night period start",
+          "night_end": "Night period end",
+          "night_update": "Update during the night"
+        }
+      }
+    },
+    "error": {
+      "invalid_ip": "Enter a valid IPv4 address or enable automatic discovery.",
+      "invalid_time": "Enter a valid time in HH:MM format.",
+      "device_not_found": "No new Airnut device connected within 30 seconds. Check DNS redirection and reconnect or restart the device.",
+      "discovery_failed": "Could not listen on TCP port 10511. Check whether another service is using the port."
+    },
+    "abort": {
+      "already_configured": "This Airnut device is already configured."
+    }
+  }
+}
