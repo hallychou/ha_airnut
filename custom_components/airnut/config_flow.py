@@ -15,10 +15,12 @@ from .const import (
     CONF_NIGHT_START,
     CONF_NIGHT_UPDATE,
     CONF_SCAN_INTERVAL,
+    CONF_SET_VOLUME_TO_ZERO,
     DEFAULT_NIGHT_END,
     DEFAULT_NIGHT_START,
     DEFAULT_NIGHT_UPDATE,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SET_VOLUME_TO_ZERO,
     DOMAIN,
 )
 from .socket_server import AirnutAsyncSocketServer
@@ -41,6 +43,9 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user_input.setdefault(CONF_NIGHT_START, DEFAULT_NIGHT_START)
             user_input.setdefault(CONF_NIGHT_END, DEFAULT_NIGHT_END)
             user_input.setdefault(CONF_NIGHT_UPDATE, DEFAULT_NIGHT_UPDATE)
+            user_input.setdefault(
+                CONF_SET_VOLUME_TO_ZERO, DEFAULT_SET_VOLUME_TO_ZERO
+            )
             auto_discover = user_input.pop(CONF_AUTO_DISCOVER, False)
             ip = user_input.get(CONF_IP, "").strip()
             if not all(
@@ -53,7 +58,7 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors[CONF_NIGHT_END] = "invalid_time"
             elif auto_discover:
                 try:
-                    discovered_ip = await self._async_discover_device()
+                    discovered_ip = await self._async_discover_device(user_input)
                 except OSError as err:
                     _LOGGER.error("Unable to start Airnut device discovery: %s", err)
                     errors["base"] = "discovery_failed"
@@ -94,6 +99,9 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_NIGHT_START, default=DEFAULT_NIGHT_START): str,
                 vol.Optional(CONF_NIGHT_END, default=DEFAULT_NIGHT_END): str,
                 vol.Optional(CONF_NIGHT_UPDATE, default=DEFAULT_NIGHT_UPDATE): bool,
+                vol.Optional(
+                    CONF_SET_VOLUME_TO_ZERO, default=DEFAULT_SET_VOLUME_TO_ZERO
+                ): bool,
             }
         )
 
@@ -101,7 +109,7 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=data_schema, errors=errors
         )
 
-    async def _async_discover_device(self) -> str | None:
+    async def _async_discover_device(self, device_config: dict) -> str | None:
         """Listen for an unconfigured Airnut device connecting to the server."""
         domain_data = self.hass.data.setdefault(DOMAIN, {})
         lock = domain_data.setdefault("_discovery_lock", asyncio.Lock())
@@ -121,7 +129,9 @@ class AirnutConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if CONF_IP in entry.data
                 }
                 discovered_ip = await server.async_wait_for_device(
-                    DISCOVERY_TIMEOUT, excluded_ips
+                    DISCOVERY_TIMEOUT,
+                    excluded_ips,
+                    device_config,
                 )
                 keep_server = discovered_ip is not None
                 return discovered_ip

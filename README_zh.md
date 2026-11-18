@@ -71,6 +71,7 @@
 | night_start     | 字符串  | 23:00   | 夜间时段开始时间（HH:MM）|
 | night_end       | 字符串  | 06:00   | 夜间时段结束时间（HH:MM）|
 | night_update    | 布尔值  | True    | 夜间是否更新数据           |
+| set_volume_to_zero | 布尔值 | False | 首次传感器上报后将设备音量设为 0 |
 
 ## 常见问题排查
 ### Q1: 添加集成时提示「already_configured」
@@ -98,8 +99,10 @@
 3. 服务端统一存储温度、湿度、PM2.5、CO₂ 数据
 4. 四个传感器从同一数据源同步更新，保证数据一致性
 
+默认情况下，集成仅请求传感器数据，不会修改设备设置。配置时启用 `set_volume_to_zero` 后，集成会在首次收到传感器数据后将设备音量设为 0。
+
 ## 独立通信测试
-仓库根目录的 `airnut_test_server.py` 是一个仅使用 Python 标准库的独立测试服务端，不依赖 Home Assistant。它会监听设备连接、打印登录和传感器上报，并按集成协议回复登录、请求传感器数据，首次收到数据后将设备音量设置为 0。
+仓库根目录的 `airnut_test_server.py` 是一个仅使用 Python 标准库的独立测试服务端，不依赖 Home Assistant。它会监听设备连接、打印登录和传感器上报，并按集成协议回复登录、请求传感器数据，首次收到数据后将设备音量设置为 100。
 
 ```bash
 python airnut_test_server.py

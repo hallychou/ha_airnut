@@ -13,10 +13,12 @@ from .const import (
     CONF_NIGHT_START,
     CONF_NIGHT_UPDATE,
     CONF_SCAN_INTERVAL,
+    CONF_SET_VOLUME_TO_ZERO,
     DEFAULT_NIGHT_END,
     DEFAULT_NIGHT_START,
     DEFAULT_NIGHT_UPDATE,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SET_VOLUME_TO_ZERO,
     MAX_SOCKET_BUFFER_SIZE,
     SOCKET_BUFFER_SIZE,
     SOCKET_HOST,
@@ -47,7 +49,7 @@ class AirnutAsyncSocketServer:
         self._server: asyncio.Server | None = None
         self._clients: dict[asyncio.StreamWriter, str] = {}
         self._client_socket_ids: dict[asyncio.StreamWriter, int | str] = {}
-        self._configured_clients: set[asyncio.StreamWriter] = set()
+        self._volume_configured_clients: set[asyncio.StreamWriter] = set()
         self._receive_buffers: dict[asyncio.StreamWriter, bytearray] = {}
         self._device_data: dict[str, AirnutDeviceData] = {}
         self._last_scan: dict[str, float] = {}
@@ -55,6 +57,7 @@ class AirnutAsyncSocketServer:
         self._device_connected = asyncio.Event()
         self._scan_interval = config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         self._is_running = False
+        self._discovery_active = False
         self._lock = asyncio.Lock()
 
     @staticmethod
@@ -94,6 +97,19 @@ class AirnutAsyncSocketServer:
         self._device_configs.pop(ip, None)
         self._last_scan.pop(ip, None)
         self._device_data.pop(ip, None)
+        for writer, client_ip in list(self._clients.items()):
+            if client_ip == ip:
+                self._discard_client(writer)
+
+    def _discard_client(self, writer: asyncio.StreamWriter) -> None:
+        """Close a client and clear its connection state."""
+        client_ip = self._clients.pop(writer, "unknown")
+        writer.close()
+        self._client_socket_ids.pop(writer, None)
+        self._volume_configured_clients.discard(writer)
+        self._receive_buffers.pop(writer, None)
+        if client_ip not in self._clients.values():
+            self._device_data.pop(client_ip, None)
 
     async def start(self) -> None:
         """Start the async socket server."""
@@ -143,7 +159,7 @@ class AirnutAsyncSocketServer:
                 finally:
                     self._clients.pop(writer, None)
                     self._client_socket_ids.pop(writer, None)
-                    self._configured_clients.discard(writer)
+                    self._volume_configured_clients.discard(writer)
                     self._receive_buffers.pop(writer, None)
 
             self._device_data.clear()
@@ -179,21 +195,31 @@ class AirnutAsyncSocketServer:
             return
 
         client_ip = peer[0]
+        if client_ip not in self._device_configs and not self._discovery_active:
+            _LOGGER.warning("Rejected unregistered Airnut connection from %s", client_ip)
+            writer.close()
+            return
+
         self._clients[writer] = client_ip
         self._client_socket_ids.pop(writer, None)
-        self._configured_clients.discard(writer)
+        self._volume_configured_clients.discard(writer)
         self._receive_buffers[writer] = bytearray()
         _LOGGER.info("Airnut device connected: %s", client_ip)
 
         try:
             while data := await reader.read(SOCKET_BUFFER_SIZE):
+                if client_ip not in self._device_configs and not self._discovery_active:
+                    _LOGGER.warning(
+                        "Closing unregistered Airnut connection from %s", client_ip
+                    )
+                    break
                 await self._parse_device_data(client_ip, writer, data)
         except (ConnectionError, OSError) as err:
             _LOGGER.error("Error handling client %s: %s", client_ip, err)
         finally:
             self._clients.pop(writer, None)
             self._client_socket_ids.pop(writer, None)
-            self._configured_clients.discard(writer)
+            self._volume_configured_clients.discard(writer)
             self._receive_buffers.pop(writer, None)
             if client_ip not in self._clients.values():
                 self._device_data.pop(client_ip, None)
@@ -222,7 +248,7 @@ class AirnutAsyncSocketServer:
     async def _send_volume_command(
         self, writer: asyncio.StreamWriter, socket_id: int | str
     ) -> None:
-        """Set the device volume after its first valid sensor report."""
+        """Set the device volume to zero when explicitly enabled."""
         volume_key = f"s_set_volume{socket_id}"
         volume_cmd = {
             "sendback_appserver": 100000007,
@@ -348,10 +374,17 @@ class AirnutAsyncSocketServer:
 
             self._device_data[client_ip] = device_data
             _LOGGER.debug("Updated data for %s: %s", client_ip, device_data)
-            socket_id = self._client_socket_ids.get(writer)
-            if socket_id is not None and writer not in self._configured_clients:
-                await self._send_volume_command(writer, socket_id)
-                self._configured_clients.add(writer)
+            device_config = self._device_configs.get(client_ip, {})
+            if (
+                device_config.get(
+                    CONF_SET_VOLUME_TO_ZERO, DEFAULT_SET_VOLUME_TO_ZERO
+                )
+                and writer not in self._volume_configured_clients
+            ):
+                socket_id = self._client_socket_ids.get(writer)
+                if socket_id is not None:
+                    await self._send_volume_command(writer, socket_id)
+                    self._volume_configured_clients.add(writer)
 
     async def update_device_data(self, device_ip: str) -> None:
         """Request updated data from a device when its scan interval expires."""
@@ -396,7 +429,7 @@ class AirnutAsyncSocketServer:
                 _LOGGER.warning("Failed to send get command to %s: %s", device_ip, err)
                 self._clients.pop(writer, None)
                 self._client_socket_ids.pop(writer, None)
-                self._configured_clients.discard(writer)
+                self._volume_configured_clients.discard(writer)
                 self._receive_buffers.pop(writer, None)
 
     def get_device_data(self, ip: str) -> AirnutDeviceData | None:
@@ -404,26 +437,37 @@ class AirnutAsyncSocketServer:
         return self._device_data.get(ip)
 
     async def async_wait_for_device(
-        self, timeout: float, excluded_ips: set[str] | None = None
+        self,
+        timeout: float,
+        excluded_ips: set[str] | None = None,
+        device_config: dict | None = None,
     ) -> str | None:
         """Wait for a logged-in Airnut device and return its IP address."""
         excluded_ips = excluded_ips or set()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
+        self._discovery_active = True
+        try:
+            while True:
+                self._device_connected.clear()
+                for writer, client_ip in self._clients.items():
+                    if (
+                        client_ip not in excluded_ips
+                        and writer in self._client_socket_ids
+                    ):
+                        if device_config is not None:
+                            self.register_device(client_ip, device_config)
+                        return client_ip
 
-        while True:
-            self._device_connected.clear()
-            for writer, client_ip in self._clients.items():
-                if (
-                    client_ip not in excluded_ips
-                    and writer in self._client_socket_ids
-                ):
-                    return client_ip
-
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                return None
-            try:
-                await asyncio.wait_for(self._device_connected.wait(), remaining)
-            except asyncio.TimeoutError:
-                return None
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    return None
+                try:
+                    await asyncio.wait_for(self._device_connected.wait(), remaining)
+                except asyncio.TimeoutError:
+                    return None
+        finally:
+            self._discovery_active = False
+            for writer, client_ip in list(self._clients.items()):
+                if client_ip not in self._device_configs:
+                    self._discard_client(writer)

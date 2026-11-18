@@ -71,6 +71,7 @@ Once the repository is included in the HACS default store, adding it as a custom
 | night_start | string | 23:00 | Night period start time (HH:MM) |
 | night_end | string | 06:00 | Night period end time (HH:MM) |
 | night_update | boolean | True | Whether to update data during the night |
+| set_volume_to_zero | boolean | False | Set device volume to 0 after its first sensor report |
 
 ## Troubleshooting
 ### Q1: "already_configured" when adding the integration
@@ -98,8 +99,10 @@ Once the repository is included in the HACS default store, adding it as a custom
 3. The server stores temperature, humidity, PM2.5 and CO₂ data in one place
 4. All four sensors sync from that same source, guaranteeing data consistency
 
+By default, the integration only requests sensor readings and does not change device settings. Enable `set_volume_to_zero` during setup to set the device volume to 0 once after its first sensor report.
+
 ## Standalone communication test
-`airnut_test_server.py` in the repository root is a standalone test server using only the Python standard library — it does not depend on Home Assistant. It listens for device connections, prints login and sensor reports, and replies per the integration protocol: answer login, request sensor data, and once the first dataset arrives set the device volume to 0.
+`airnut_test_server.py` in the repository root is a standalone test server using only the Python standard library — it does not depend on Home Assistant. It listens for device connections, prints login and sensor reports, and replies per the integration protocol: answer login, request sensor data, and once the first dataset arrives set the device volume to 100.
 
 ```bash
 python airnut_test_server.py

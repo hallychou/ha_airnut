@@ -10,7 +10,8 @@
           "scan_interval": "Scan interval",
           "night_start": "Night period start",
           "night_end": "Night period end",
-          "night_update": "Update during the night"
+          "night_update": "Update during the night",
+          "set_volume_to_zero": "Set device volume to 0 after the first sensor report"
         }
       }
     },

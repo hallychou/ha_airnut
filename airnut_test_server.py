@@ -172,11 +172,11 @@ class AirnutTestServer:
                     {
                         "sendback_appserver": 100000007,
                         "param": {
-                            "volume": 0,
+                            "volume": 100,
                             "socket_id": 100000007,
                             "check_key": volume_key,
                         },
-                        "volume": 0,
+                        "volume": 100,
                         "p": "set_volume",
                         "type": "control",
                         "check_key": volume_key,

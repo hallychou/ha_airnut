@@ -11,12 +11,14 @@ CONF_SCAN_INTERVAL = "scan_interval"
 CONF_NIGHT_START = "night_start"
 CONF_NIGHT_END = "night_end"
 CONF_NIGHT_UPDATE = "night_update"
+CONF_SET_VOLUME_TO_ZERO = "set_volume_to_zero"
 
 # 默认配置
 DEFAULT_SCAN_INTERVAL = 600
 DEFAULT_NIGHT_START = "23:00"
 DEFAULT_NIGHT_END = "06:00"
 DEFAULT_NIGHT_UPDATE = True
+DEFAULT_SET_VOLUME_TO_ZERO = False
 
 # Socket配置
 SOCKET_HOST = "0.0.0.0"

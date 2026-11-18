@@ -10,7 +10,8 @@
           "scan_interval": "扫描间隔",
           "night_start": "夜间开始时间",
           "night_end": "夜间结束时间",
-          "night_update": "夜间更新"
+          "night_update": "夜间更新",
+          "set_volume_to_zero": "首次收到传感器数据后将设备音量设为 0"
         }
       }
     },
