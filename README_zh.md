@@ -33,12 +33,8 @@
 
 ## 安装方法
 ### 方法1：通过 HACS 安装
-本仓库可作为 HACS 自定义仓库安装，目前尚未收录到 HACS 默认市场。
-1. 在 HACS 中打开集成页面，点击右上角三点菜单 → **自定义存储库**
-2. 添加 `hallychou/ha_airnut`，类别选择 **Integration**
-3. 搜索 **Airnut 1S**，下载后重启 Home Assistant
-
-收录到 HACS 默认市场后，无需再手动添加自定义仓库。
+1. 在 HACS 中搜索 **Airnut 1S**
+2. 下载集成并重启 Home Assistant
 
 ### 方法2：手动安装
 1. 将 `custom_components/airnut` 复制到 Home Assistant `config` 目录下的 `custom_components` 文件夹

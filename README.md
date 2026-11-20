@@ -33,12 +33,8 @@ Configure DNS hijacking on your router so that `apn.airnut.com` resolves to Home
 
 ## Installation
 ### Method 1: HACS
-This repository can be installed as a custom HACS repository. It is not yet included in the HACS default store.
-1. In HACS, open the integration page and select the three-dot menu → **Custom repositories**
-2. Add `hallychou/ha_airnut` with the category **Integration**
-3. Find **Airnut 1S**, download it, and restart Home Assistant
-
-Once the repository is included in the HACS default store, adding it as a custom repository will no longer be necessary.
+1. In HACS, search for **Airnut 1S**
+2. Download the integration and restart Home Assistant
 
 ### Method 2: Manual install
 1. Copy `custom_components/airnut` into the `custom_components` folder in Home Assistant's `config` directory
